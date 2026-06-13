@@ -37,23 +37,26 @@
         ::-webkit-scrollbar { width: 0px; }
     </style>
 </head>
-<body class="flex flex-col">
+<body class="flex flex-col h-screen" id="mainBody">
 
+    <!-- Top Navigation Bar -->
     <div class="h-[60px] bg-[#16213e] flex justify-between items-center px-6 border-b border-white/5 z-50">
-        <button onclick="history.back()" class="text-gray-400"><i class="fa-solid fa-arrow-left"></i></button>
+        <button onclick="history.back()" class="text-gray-400 active:scale-75 transition-all"><i class="fa-solid fa-arrow-left"></i></button>
         <h2 id="chapterTitle" class="text-[10px] font-black uppercase text-yellow-500 italic tracking-widest">Smart NCERT Reader</h2>
-        <button onclick="toggleFullscreen()" class="text-gray-400"><i class="fa-solid fa-expand"></i></button>
+        <button onclick="toggleFullscreen()" class="text-gray-400 active:scale-75 transition-all"><i class="fa-solid fa-expand"></i></button>
     </div>
 
+    <!-- Main Viewport for PDF Render -->
     <div class="viewport" id="readerViewport">
-        <div class="relative" id="pdfWrapper">
+        <div class="relative inline-block left-1/2 -translate-x-1/2" id="pdfWrapper">
             <canvas id="pdf-canvas"></canvas>
             <div id="highlight-box"></div>
-            <div id="tag-layer"></div>
+            <div id="tag-layer" class="absolute inset-0 pointer-events-none"></div>
         </div>
     </div>
 
-    <div class="control-bar p-6 space-y-4 shadow-2xl">
+    <!-- Audio Controller Bar -->
+    <div class="control-bar p-6 space-y-4 shadow-2xl z-50">
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-5">
                 <button onclick="handlePlay()" id="playBtn" class="w-14 h-14 bg-[#eab308] text-black rounded-full flex items-center justify-center text-2xl shadow-lg active:scale-90 transition-all">
@@ -65,26 +68,29 @@
                 </div>
             </div>
 
+            <!-- Playback Speed Control -->
             <div class="flex items-center gap-3">
                 <div class="bg-black/40 px-3 py-2 rounded-xl border border-white/10 flex items-center gap-2">
                     <i class="fa-solid fa-bolt text-yellow-500 text-[10px]"></i>
-                    <select onchange="setPlaybackSpeed(this.value)" class="bg-transparent text-[10px] font-black outline-none text-white">
-                        <option value="0.75">0.75x</option>
-                        <option value="1" selected>1.0x</option>
-                        <option value="1.5">1.5x</option>
-                        <option value="2">2.0x</option>
+                    <select onchange="setPlaybackSpeed(this.value)" class="bg-transparent text-[10px] font-black outline-none text-white cursor-pointer">
+                        <option value="0.75" class="bg-[#16213e]">0.75x</option>
+                        <option value="1" selected class="bg-[#16213e]">1.0x</option>
+                        <option value="1.5" class="bg-[#16213e]">1.5x</option>
+                        <option value="2" class="bg-[#16213e]">2.0x</option>
                     </select>
                 </div>
             </div>
         </div>
 
-        <div class="relative h-1.5 w-full bg-white/5 rounded-full overflow-hidden" onclick="seekAudio(event)">
-            <div id="progressBar" class="absolute h-full bg-[#eab308] transition-all duration-200" style="width: 0%"></div>
+        <!-- Custom Timeline / Progress Bar -->
+        <div class="relative h-2 w-full bg-white/5 rounded-full overflow-hidden cursor-pointer" onclick="seekAudio(event)" id="progressContainer">
+            <div id="progressBar" class="absolute left-0 top-0 h-full bg-[#eab308] transition-all duration-100 pointer-events-none" style="width: 0%"></div>
         </div>
     </div>
 
+    <!-- Interactive Quiz Modal Layer -->
     <div id="quizModal" class="fixed inset-0 bg-black/95 z-[100] hidden items-center justify-center p-6">
-        <div class="bg-white rounded-[2.5rem] w-full max-w-sm p-8 text-black">
+        <div class="bg-white rounded-[2.5rem] w-full max-w-sm p-8 text-black transform scale-95 transition-all">
             <p class="text-[9px] font-black uppercase text-red-500 mb-2 italic">PYQ Challenge</p>
             <h3 id="quizQuestion" class="text-base font-bold mb-8 leading-tight">Question loading...</h3>
             <div class="grid gap-3">
@@ -101,7 +107,7 @@
         const database = firebase.database();
 
         const params = new URLSearchParams(window.location.search);
-        const batchId = localStorage.getItem('selectedBatchId');
+        const batchId = localStorage.getItem('selectedBatchId') || "B001";
         const chapterId = params.get('id');
 
         let audio = new Audio();
@@ -109,35 +115,52 @@
         let pdfDoc = null;
 
         async function init() {
-            if(!chapterId) return;
+            if(!chapterId) {
+                document.getElementById('statusText').innerText = "Chapter ID Missing!";
+                return;
+            }
             
             database.ref(`courses/${batchId}/ncert/${chapterId}`).once('value', async snap => {
                 const data = snap.val();
-                document.getElementById('chapterTitle').innerText = data.name;
-                audio.src = data.audio;
-                mapData = data.map || [];
-                
-                await renderPDF(data.pdf);
-                renderPYQTags();
+                if(data) {
+                    document.getElementById('chapterTitle').innerText = data.name;
+                    audio.src = data.audio;
+                    mapData = data.map || [];
+                    
+                    if(data.pdf) {
+                        await renderPDF(data.pdf);
+                        renderPYQTags();
+                    } else {
+                        document.getElementById('statusText').innerText = "PDF Link Not Found";
+                    }
+                }
             });
         }
 
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         async function renderPDF(url) {
-            const pdf = await pdfjsLib.getDocument(url).promise;
-            const page = await pdf.getPage(1);
-            const viewport = page.getViewport({ scale: 2 });
-            const canvas = document.getElementById('pdf-canvas');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
-            await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+            try {
+                const pdf = await pdfjsLib.getDocument(url).promise;
+                const page = await pdf.getPage(1);
+                const viewport = page.getViewport({ scale: 1.5 });
+                const canvas = document.getElementById('pdf-canvas');
+                const context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                await page.render({ canvasContext: context, viewport }).promise;
+            } catch (error) {
+                console.error("PDF Render Error:", error);
+                document.getElementById('statusText').innerText = "CORS / PDF Loading Error";
+            }
         }
 
         audio.ontimeupdate = () => {
             const time = audio.currentTime;
             const duration = audio.duration || 0;
             
-            document.getElementById('progressBar').style.width = (time / duration * 100) + "%";
+            if (duration > 0) {
+                document.getElementById('progressBar').style.width = (time / duration * 100) + "%";
+            }
             document.getElementById('timerText').innerText = formatTime(time) + " / " + formatTime(duration);
 
             // Audio-Sync Highlight Logic
@@ -148,6 +171,11 @@
             }
         };
 
+        audio.onended = () => {
+            document.getElementById('playBtn').innerHTML = '<i class="fa-solid fa-play"></i>';
+            document.getElementById('statusText').innerText = "Reading Finished";
+        };
+
         function syncUI(x, y) {
             const box = document.getElementById('highlight-box');
             box.style.display = 'block';
@@ -156,7 +184,7 @@
             box.style.width = '120px';
             box.style.height = '24px';
 
-            // Auto Scroll
+            // Auto Smooth Scrolling
             document.getElementById('readerViewport').scrollTo({
                 top: y - 200,
                 behavior: 'smooth'
@@ -165,27 +193,62 @@
 
         function renderPYQTags() {
             const layer = document.getElementById('tag-layer');
+            layer.innerHTML = ""; // Clear existing tags
             mapData.forEach(p => {
                 if(p.quiz) {
                     const bubble = document.createElement('div');
                     bubble.className = 'pyq-bubble';
                     bubble.style.left = p.x + 'px';
                     bubble.style.top = p.y + 'px';
+                    bubble.style.pointerEvents = 'auto'; // Re-enable click event
                     bubble.innerHTML = 'Q';
-                    bubble.onclick = () => showQuiz(p.quiz);
+                    bubble.onclick = (e) => {
+                        e.stopPropagation();
+                        showQuiz(p.quiz);
+                    };
                     layer.appendChild(bubble);
                 }
             });
         }
 
         function handlePlay() {
-            if(audio.paused) { audio.play(); document.getElementById('playBtn').innerHTML = '<i class="fa-solid fa-pause"></i>'; }
-            else { audio.pause(); document.getElementById('playBtn').innerHTML = '<i class="fa-solid fa-play"></i>'; }
+            if(!audio.src) return;
+            if(audio.paused) { 
+                audio.play(); 
+                document.getElementById('playBtn').innerHTML = '<i class="fa-solid fa-pause"></i>'; 
+                document.getElementById('statusText').innerText = "Sync Active: Audio Playing";
+            } else { 
+                audio.pause(); 
+                document.getElementById('playBtn').innerHTML = '<i class="fa-solid fa-play"></i>'; 
+                document.getElementById('statusText').innerText = "Audio Paused";
+            }
+        }
+
+        function seekAudio(event) {
+            if (!audio.duration) return;
+            const container = document.getElementById('progressContainer');
+            const rect = container.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const width = rect.width;
+            const percentage = clickX / width;
+            audio.currentTime = percentage * audio.duration;
+        }
+
+        function toggleFullscreen() {
+            const elem = document.getElementById('mainBody');
+            if (!document.fullscreenElement) {
+                elem.requestFullscreen().catch(err => {
+                    alert(`Error attempting to enable full-screen mode: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
         }
 
         function showQuiz(q) {
             audio.pause();
             document.getElementById('playBtn').innerHTML = '<i class="fa-solid fa-play"></i>';
+            document.getElementById('statusText').innerText = "Quiz Active";
             document.getElementById('quizQuestion').innerText = q;
             document.getElementById('quizModal').style.display = 'flex';
         }
@@ -195,8 +258,14 @@
             closeQuiz();
         }
 
-        function closeQuiz() { document.getElementById('quizModal').style.display = 'none'; }
-        function setPlaybackSpeed(v) { audio.playbackRate = v; }
+        function closeQuiz() { 
+            document.getElementById('quizModal').style.display = 'none'; 
+            if(audio.paused) {
+                document.getElementById('statusText').innerText = "Audio Paused";
+            }
+        }
+        
+        function setPlaybackSpeed(v) { audio.playbackRate = parseFloat(v); }
         function formatTime(s) { return new Date(s * 1000).toISOString().substr(14, 5); }
 
         init();
